@@ -371,7 +371,16 @@ function onOrient(e) {
   let h = null;
   if (e.webkitCompassHeading != null) h = e.webkitCompassHeading;
   else if (e.alpha != null && (e.absolute || e.type === 'deviceorientationabsolute')) {
-    h = 360 - e.alpha + ((screen.orientation && screen.orientation.angle) || 0);
+    const d = Math.PI / 180, a = e.alpha * d, b = (e.beta || 0) * d, g = (e.gamma || 0) * d;
+    if (Math.abs(e.beta || 0) > 50 && Math.abs(e.beta || 0) < 130) {
+      // phone held upright: use the direction the back of the phone faces
+      const x = -Math.cos(a) * Math.sin(g) - Math.sin(a) * Math.sin(b) * Math.cos(g);
+      const y = -Math.sin(a) * Math.sin(g) + Math.cos(a) * Math.sin(b) * Math.cos(g);
+      h = Math.atan2(x, y) / d;
+    } else {
+      // phone held flat: use top edge direction
+      h = 360 - e.alpha + ((screen.orientation && screen.orientation.angle) || 0);
+    }
   }
   if (h == null) return;
   lastSensor = Date.now();
@@ -379,6 +388,7 @@ function onOrient(e) {
 }
 async function startCompass() {
   if (compassOn) return;
+  $('compassRead').textContent = 'Starting...';
   try {
     if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
       const r = await DeviceOrientationEvent.requestPermission();
@@ -388,8 +398,15 @@ async function startCompass() {
   compassOn = true;
   window.addEventListener('deviceorientationabsolute', onOrient, true);
   window.addEventListener('deviceorientation', onOrient, true);
+  setTimeout(() => {
+    if (!lastSensor) $('compassRead').textContent = 'No sensor. Tap me';
+  }, 3000);
 }
-$('compass').addEventListener('click', () => { compassOn = false; startCompass(); });
+$('compass').addEventListener('click', () => {
+  window.removeEventListener('deviceorientationabsolute', onOrient, true);
+  window.removeEventListener('deviceorientation', onOrient, true);
+  compassOn = false; lastSensor = 0; startCompass();
+});
 
 // ====== SOUND ======
 let actx = null;
