@@ -42,6 +42,24 @@ button:disabled{opacity:.4}
 .pin.caught{background:#777}
 .pin.me{box-shadow:0 0 0 4px #5b9dff}
 .tag{position:absolute;transform:translate(-50%,10px);font-size:12px;font-weight:700;color:#000;background:#fffc;padding:1px 6px;border-radius:8px;white-space:nowrap}
+
+.roles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0}
+.roles button{margin:0;background:#2a3a63;opacity:.55;border:3px solid transparent}
+.roles button.sel{opacity:1;border-color:#fff}
+#roleHunter.sel{background:#e0394b}
+#rolePlayer.sel{background:#1fa971}
+#compass{position:absolute;top:64px;right:10px;z-index:1000;width:84px;text-align:center}
+#compass .dial{position:relative;width:84px;height:84px;border-radius:50%;background:#0b1220ee;border:2px solid #2a3a63}
+#compass .ring{position:absolute;inset:0;transition:transform .15s linear}
+#compass .ring span{position:absolute;font-weight:800;font-size:14px}
+#compass .n{top:2px;left:50%;transform:translateX(-50%);color:#ff4d5e}
+#compass .e{right:6px;top:50%;transform:translateY(-50%)}
+#compass .s{bottom:2px;left:50%;transform:translateX(-50%)}
+#compass .w{left:6px;top:50%;transform:translateY(-50%)}
+#compass .ptr{position:absolute;top:-8px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:13px solid #ffd54a;z-index:2}
+#compass .read{margin-top:4px;background:#0b1220ee;border-radius:12px;padding:3px 6px;font-size:13px;font-weight:700}
+#caughtInfo.flash{animation:flash .9s}
+@keyframes flash{0%{background:#e0394b;transform:scale(1.15)}100%{background:#0b1220ee;transform:scale(1)}}
 </style>
 </head>
 <body>
@@ -65,7 +83,9 @@ button:disabled{opacity:.4}
   <div class="code" id="lobbyCode">------</div>
   <div class="card" id="gpsStatus">📡 GPS: waiting...</div>
   <div class="card"><b id="plCount">Players</b><div id="plList"></div></div>
-  <button id="roleBtn" class="red">I'm the Hunter</button>
+  <div class="card"><div style="margin-bottom:8px"><b>Choose your role</b></div>
+    <div class="roles"><button id="roleHunter">🎯 Hunter</button><button id="rolePlayer" class="sel">🏃 Player</button></div>
+  </div>
   <div class="card">
     <div>⏱ Timer (minutes)</div>
     <select id="dur">
@@ -86,6 +106,7 @@ button:disabled{opacity:.4}
 <div id="game" class="screen hidden">
   <div id="map"></div>
   <div id="hud"><div id="timeLeft">--:--</div><div id="caughtInfo">Caught 0/0</div></div>
+  <div id="compass"><div class="dial"><div class="ptr"></div><div class="ring" id="ring"><span class="n">N</span><span class="e">E</span><span class="s">S</span><span class="w">W</span></div></div><div class="read" id="compassRead">Tap compass</div></div>
   <button id="recenter" class="gray">📍</button>
   <div id="panel"></div>
   <div id="countdown" class="overlay hidden"><div>Get ready!</div><div id="count">10</div></div>
@@ -124,6 +145,7 @@ const now = () => Date.now() + offset;
 let me = { key: '', room: '' };
 let roomRef = null, state = null;
 let map = null, markers = {}, fitted = false;
+let soundPlayed = false, heading = null, compassOn = false, lastSensor = 0;
 let watchId = null, lastSend = 0, wakeLock = null, ending = false, lastPanel = '';
 
 function show(id) {
@@ -135,6 +157,7 @@ function show(id) {
 $('name').value = localStorage.getItem('mh_name') || '';
 
 $('createBtn').onclick = async () => {
+  unlockAudio(); startCompass();
   const key = clean($('name').value);
   if (!key) return alert('Enter your name');
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -145,6 +168,7 @@ $('createBtn').onclick = async () => {
 };
 
 $('joinBtn').onclick = () => {
+  unlockAudio(); startCompass();
   const key = clean($('name').value);
   const code = $('codeIn').value.trim().toUpperCase();
   if (!key) return alert('Enter your name');
@@ -163,7 +187,7 @@ async function enter(code, key) {
   if (!existing) await ref.child('players/' + key).set({ name: key, role: 'runner', caught: false });
   me = { key, room: code };
   roomRef = ref;
-  fitted = false; ending = false; lastPanel = '';
+  fitted = false; ending = false; lastPanel = ''; soundPlayed = false;
   roomRef.on('value', s => { state = s.val(); render(); });
   startGPS();
   requestWake();
@@ -175,6 +199,7 @@ function startGPS() {
   if (watchId !== null) return;
   watchId = navigator.geolocation.watchPosition(pos => {
     const { latitude, longitude, accuracy } = pos.coords;
+    if (pos.coords.heading != null && !isNaN(pos.coords.heading) && (pos.coords.speed || 0) > 0.7 && Date.now() - lastSensor > 3000) setHeading(pos.coords.heading);
     $('gpsStatus').textContent = '📡 GPS OK (±' + Math.round(accuracy) + ' m)';
     const t = Date.now();
     if (roomRef && t - lastSend > 3000) {
@@ -192,11 +217,12 @@ async function requestWake() {
 document.addEventListener('visibilitychange', () => { if (!document.hidden && roomRef) requestWake(); });
 
 // ====== LOBBY ACTIONS ======
-$('roleBtn').onclick = () => {
-  const p = state && state.players && state.players[me.key];
-  if (!p) return;
-  roomRef.child('players/' + me.key + '/role').set(p.role === 'hunter' ? 'runner' : 'hunter');
-};
+function setRole(r) {
+  if (!roomRef || !state || !state.players || !state.players[me.key]) return;
+  roomRef.child('players/' + me.key + '/role').set(r);
+}
+$('roleHunter').onclick = () => setRole('hunter');
+$('rolePlayer').onclick = () => setRole('runner');
 $('dur').onchange = () => roomRef.child('duration').set(parseInt($('dur').value));
 $('startBtn').onclick = () => {
   const ps = Object.values(state.players || {});
@@ -217,7 +243,7 @@ function leave(removeSelf) {
   }
   if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
   try { if (wakeLock) wakeLock.release(); } catch (e) {}
-  roomRef = null; state = null;
+  roomRef = null; state = null; soundPlayed = false;
   Object.values(markers).forEach(m => map && map.removeLayer(m)); markers = {};
   $('endScreen').classList.add('hidden');
   show('home');
@@ -263,8 +289,9 @@ function render() {
     $('plCount').textContent = 'Players (' + list.length + '/10)';
     $('plList').innerHTML = list.map(([k, p]) =>
       '<div class="row"><span>' + esc(p.name || k) + (k === me.key ? ' (You)' : '') + (k === state.host ? ' 👑' : '') +
-      '</span><span class="badge ' + (p.role === 'hunter' ? 'h' : '') + '">' + (p.role === 'hunter' ? 'Hunter' : 'Runner') + '</span></div>').join('');
-    $('roleBtn').textContent = mine.role === 'hunter' ? "I'm a Runner instead" : "I'm the Hunter";
+      '</span><span class="badge ' + (p.role === 'hunter' ? 'h' : '') + '">' + (p.role === 'hunter' ? 'Hunter' : 'Player') + '</span></div>').join('');
+    $('roleHunter').classList.toggle('sel', mine.role === 'hunter');
+    $('rolePlayer').classList.toggle('sel', mine.role !== 'hunter');
     $('dur').classList.toggle('hidden', !isHost);
     $('durView').classList.toggle('hidden', isHost);
     $('durView').textContent = (state.duration || 10) + ' minutes';
@@ -280,7 +307,11 @@ function render() {
   const all = Object.values(players);
   const runners = all.filter(p => p.role !== 'hunter');
   const caught = runners.filter(p => p.caught).length;
-  $('caughtInfo').textContent = 'Caught ' + caught + '/' + runners.length;
+  const ctxt = '🎯 Caught ' + caught + '/' + runners.length;
+  if ($('caughtInfo').textContent !== ctxt) {
+    $('caughtInfo').textContent = ctxt;
+    $('caughtInfo').classList.remove('flash'); void $('caughtInfo').offsetWidth; $('caughtInfo').classList.add('flash');
+  }
 
   // panel
   let html = '';
@@ -289,14 +320,13 @@ function render() {
     const rows = Object.entries(players).filter(([k, p]) => p.role !== 'hunter' && !p.caught).map(([k, p]) => {
       let d = '';
       if (myM && p.lat != null) d = Math.round(map.distance(myM.getLatLng(), [p.lat, p.lng]) / 5) * 5 + ' m';
-      return '<div class="row"><span>' + esc(p.name || k) + ' <small style="color:#8fa0c4">' + d + '</small></span>' +
-        '<button class="red" style="width:auto;padding:8px 18px;margin:0" data-k="' + esc(k) + '">Catch</button></div>';
+      return '<div class="row"><span>' + esc(p.name || k) + '</span><small style="color:#8fa0c4">' + d + '</small></div>';
     });
-    html = '<b>🎯 Hunter mode</b>' + (rows.length ? rows.join('') : '<div style="padding:8px 0">Everyone caught!</div>');
+    html = '<b>🎯 Hunter mode</b><div style="color:#8fa0c4;font-size:14px;margin-bottom:6px">Touch a player in real life. They press "Catch" on THEIR phone.</div>' + (rows.length ? rows.join('') : '<div style="padding:8px 0">Everyone caught!</div>');
   } else if (mine.caught) {
     html = '<b>💀 You were caught</b><div style="color:#8fa0c4">Wait for the game to end.</div>';
   } else {
-    html = '<b>🏃 Run & hide!</b><div style="color:#8fa0c4">Stay inside the campus. Hunter is the red dot.</div>';
+    html = '<b>🏃 Run & hide!</b><div style="color:#8fa0c4">Stay inside the campus. Hunter is the red dot.</div><button id="caughtBtn" class="red">🖐 Catch (hunter caught me)</button>';
   }
   if (html !== lastPanel) { $('panel').innerHTML = html; lastPanel = html; }
 
@@ -310,17 +340,79 @@ function render() {
     $('endMsg').textContent = hunterWon ? 'All players were caught.' : "Time's up! At least 1 player is safe.";
     $('endScreen').classList.remove('hidden');
     $('countdown').classList.add('hidden');
+    if (!soundPlayed) {
+      soundPlayed = true;
+      won ? playWin() : playLose();
+      try { navigator.vibrate && navigator.vibrate(won ? [200, 100, 200] : [600]); } catch (e) {}
+    }
   } else {
     $('endScreen').classList.add('hidden');
   }
 }
 
-// Catch button (only the hunter's panel has it)
+// Catch button: ONLY on the player's own phone (hunter has none)
 $('panel').addEventListener('click', e => {
-  const k = e.target.getAttribute && e.target.getAttribute('data-k');
-  if (!k || !state || state.status !== 'playing' || now() < state.startAt) return;
-  roomRef.child('players/' + k + '/caught').set(true);
+  if (!e.target.closest('#caughtBtn')) return;
+  const p = state && state.players && state.players[me.key];
+  if (!p || p.role === 'hunter' || p.caught || state.status !== 'playing' || now() < state.startAt) return;
+  if (!confirm('Confirm: the Hunter caught you?')) return;
+  roomRef.child('players/' + me.key + '/caught').set(true);
 });
+
+// ====== COMPASS ======
+const DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+function setHeading(h) {
+  if (h == null || isNaN(h)) return;
+  heading = (h % 360 + 360) % 360;
+  $('ring').style.transform = 'rotate(' + (-heading) + 'deg)';
+  $('compassRead').textContent = DIRS[Math.round(heading / 45) % 8] + ' ' + Math.round(heading) + '°';
+}
+function onOrient(e) {
+  let h = null;
+  if (e.webkitCompassHeading != null) h = e.webkitCompassHeading;
+  else if (e.alpha != null && (e.absolute || e.type === 'deviceorientationabsolute')) {
+    h = 360 - e.alpha + ((screen.orientation && screen.orientation.angle) || 0);
+  }
+  if (h == null) return;
+  lastSensor = Date.now();
+  setHeading(h);
+}
+async function startCompass() {
+  if (compassOn) return;
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') { $('compassRead').textContent = 'Compass denied'; return; }
+    }
+  } catch (e) {}
+  compassOn = true;
+  window.addEventListener('deviceorientationabsolute', onOrient, true);
+  window.addEventListener('deviceorientation', onOrient, true);
+}
+$('compass').addEventListener('click', () => { compassOn = false; startCompass(); });
+
+// ====== SOUND ======
+let actx = null;
+function unlockAudio() {
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+  } catch (e) {}
+}
+document.addEventListener('pointerdown', unlockAudio);
+function tone(freq, start, dur, type, vol) {
+  if (!actx) return;
+  const t0 = actx.currentTime + start;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function playWin() { [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, i * 0.16, 0.3, 'triangle', 0.35)); }
+function playLose() { [392, 370, 349, 311].forEach((f, i) => tone(f, i * 0.38, 0.5, 'sawtooth', 0.2)); }
 
 // ====== TIMER + END CHECK ======
 setInterval(() => {
