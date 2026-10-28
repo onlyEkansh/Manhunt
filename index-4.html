@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0b1220">
+<title>Manhunt</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#0b1220;color:#e8eefc;font-family:system-ui,Arial,sans-serif;overscroll-behavior:none}
+.hidden{display:none!important}
+.screen{height:100%;padding:20px;overflow:auto}
+h1{font-size:40px;margin:10px 0 4px;letter-spacing:1px}
+h1 span{color:#ff3b4e}
+.sub{color:#8fa0c4;margin:0 0 24px}
+input,select{width:100%;padding:14px;margin:6px 0 12px;border-radius:12px;border:1px solid #2a3a63;background:#131d36;color:#fff;font-size:17px}
+button{width:100%;padding:15px;margin:6px 0;border:0;border-radius:12px;font-size:17px;font-weight:700;color:#fff;background:#5b4bff}
+button.green{background:#1fa971}
+button.red{background:#e0394b}
+button.gray{background:#2a3a63}
+button:disabled{opacity:.4}
+.code{font-size:44px;letter-spacing:6px;text-align:center;font-weight:800;background:#131d36;border-radius:14px;padding:12px;margin:10px 0}
+.card{background:#131d36;border-radius:14px;padding:12px 14px;margin:10px 0}
+.row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #22305a}
+.row:last-child{border:0}
+.badge{font-size:12px;padding:3px 8px;border-radius:20px;background:#2a3a63}
+.badge.h{background:#e0394b}
+.roles{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:6px 0}
+.roles button{margin:0;background:#2a3a63;opacity:.55;border:3px solid transparent}
+.roles button.sel{opacity:1;border-color:#fff}
+#roleHunter.sel{background:#e0394b}
+#rolePlayer.sel{background:#1fa971}
+
+/* ===== GAME SCREEN ===== */
+#game{padding:0;position:relative;overflow:hidden}
+#mapWrap{position:absolute;inset:0;overflow:hidden;background:#0b1220}
+#map{position:absolute;left:50%;top:50%;transform-origin:50% 50%}
+#hud{position:absolute;top:0;left:0;right:0;z-index:1000;display:flex;justify-content:space-between;gap:8px;padding:10px;pointer-events:none}
+#hud div{background:#0b1220ee;padding:8px 14px;border-radius:20px;font-weight:700}
+#legend{position:absolute;top:58px;left:10px;z-index:1000;background:#0b1220e6;border-radius:12px;padding:6px 10px;font-size:11px;font-weight:700;line-height:1.5;pointer-events:none}
+#panel{position:absolute;left:0;right:0;bottom:0;z-index:1000;background:#0b1220f2;padding:12px 12px 20px;border-radius:18px 18px 0 0;max-height:38%;overflow:auto}
+#attr{position:absolute;right:8px;bottom:3px;z-index:1001;font-size:10px;color:#6f7fa8;pointer-events:none}
+#mapBtns{position:absolute;left:10px;top:130px;z-index:1000;display:flex;flex-direction:column;gap:8px}
+.mb{width:46px;height:46px;padding:0;margin:0;border-radius:12px;font-size:20px;background:#0b1220e6;border:2px solid #2a3a63}
+.mb.on{background:#5b4bff;border-color:#fff}
+.overlay{position:absolute;inset:0;z-index:2000;background:#0b1220ee;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px}
+#count{font-size:120px;font-weight:900}
+.big{font-size:48px;font-weight:900;margin:0 0 8px}
+
+/* ===== PINS (dot + facing arrow + name) ===== */
+.pinwrap{overflow:visible}
+.pinbox{position:absolute;left:0;top:0;width:0;height:0;--c:31,169,113}
+.pinbox.hunter{--c:224,57,75}
+.pinbox.caught{--c:120,120,120}
+.pinbox.stale{opacity:.5}
+.pin{position:absolute;left:0;top:0;width:18px;height:18px;border-radius:50%;border:3px solid #fff;transform:translate(-50%,-50%);box-shadow:0 0 6px #000;background:rgb(var(--c))}
+.pinbox.hunter .pin{width:24px;height:24px}
+.pinbox.me .pin{box-shadow:0 0 0 4px #5b9dff,0 0 8px #000}
+.cone{position:absolute;left:-36px;top:-36px;width:72px;height:72px;pointer-events:none;display:none}
+.cone::before{content:"";position:absolute;inset:0;background:radial-gradient(circle at 50% 50%,rgba(var(--c),.65),rgba(var(--c),0) 70%);clip-path:polygon(50% 50%,18% 0,82% 0)}
+.cone::after{content:"";position:absolute;left:50%;top:-4px;transform:translateX(-50%);border-left:8px solid transparent;border-right:8px solid transparent;border-bottom:15px solid rgb(var(--c));filter:drop-shadow(0 0 2px #fff)}
+.tagwrap{position:absolute;left:0;top:0;width:0;height:0;transform:rotate(var(--unrot,0deg))}
+.tag{position:absolute;left:0;top:0;transform:translate(-50%,20px);font-size:12px;font-weight:700;color:#000;background:#fffc;padding:1px 6px;border-radius:8px;white-space:nowrap}
+
+/* ===== COMPASS ===== */
+#compass{position:absolute;top:60px;right:10px;z-index:1000;width:92px;text-align:center}
+#compass .dial{position:relative;width:92px;height:92px;border-radius:50%;background:#0b1220ee;border:2px solid #3a4c85;margin-top:10px}
+#compass .ring{position:absolute;inset:0}
+#compass .ring span{position:absolute;font-weight:800;font-size:15px}
+#compass .n{top:3px;left:50%;transform:translateX(-50%);color:#ff4d5e}
+#compass .e{right:6px;top:50%;transform:translateY(-50%)}
+#compass .s{bottom:3px;left:50%;transform:translateX(-50%)}
+#compass .w{left:6px;top:50%;transform:translateY(-50%)}
+#compass .tick{position:absolute;left:50%;top:50%;width:2px;height:7px;margin-left:-1px;background:#8fa0c4;transform-origin:50% 0}
+#compass .ptr{position:absolute;top:-10px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;border-top:14px solid #ffd54a;z-index:2}
+#compass .dot{position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:#ffd54a;z-index:2}
+#compass .read{margin-top:4px;background:#0b1220ee;border-radius:12px;padding:3px 6px;font-size:14px;font-weight:700}
+.xwrap{position:absolute;left:0;top:0;width:0;height:0;transform:rotate(var(--unrot,0deg))}
+.xmark{position:absolute;left:0;top:0;transform:translate(-50%,-50%);font-size:30px;line-height:1;font-weight:900;color:#ff4d5e;text-shadow:0 0 3px #000,0 0 3px #000,0 0 6px #000}
+.xtag{position:absolute;left:0;top:0;transform:translate(-50%,16px);font-size:11px;font-weight:700;color:#fff;background:#000a;padding:1px 6px;border-radius:8px;white-space:nowrap}
+#hideBanner{position:absolute;bottom:40%;left:50%;transform:translateX(-50%);z-index:1000;background:#e0394bee;padding:6px 14px;border-radius:16px;font-weight:800;font-size:13px;pointer-events:none;white-space:nowrap}
+#caughtInfo.flash{animation:flash .9s}
+@keyframes flash{0%{background:#e0394b;transform:scale(1.15)}100%{background:#0b1220ee;transform:scale(1)}}
+</style>
+</head>
+<body>
+
+<!-- ================= HOME ================= -->
+<div id="home" class="screen">
+  <h1>MAN<span>HUNT</span></h1>
+  <p class="sub">Real People • Real Movement • Real Chase</p>
+  <label>Your name</label>
+  <input id="name" maxlength="16" placeholder="e.g. Ekansh" autocomplete="off">
+  <button id="createBtn">Create Room</button>
+  <div style="text-align:center;color:#8fa0c4;margin:10px">— or —</div>
+  <input id="codeIn" maxlength="6" placeholder="Room code" autocapitalize="characters" autocomplete="off" style="text-transform:uppercase;text-align:center;letter-spacing:4px">
+  <button id="joinBtn" class="green">Join Room</button>
+</div>
+
+<!-- ================= LOBBY ================= -->
+<div id="lobby" class="screen hidden">
+  <h1>Lobby</h1>
+  <div class="sub">Share this code with friends</div>
+  <div class="code" id="lobbyCode">------</div>
+  <div class="card" id="gpsStatus">📡 GPS: waiting...</div>
+  <div class="card"><b id="plCount">Players</b><div id="plList"></div></div>
+  <div class="card"><div style="margin-bottom:8px"><b>Choose your role</b></div>
+    <div class="roles"><button id="roleHunter">🎯 Hunter</button><button id="rolePlayer" class="sel">🏃 Player</button></div>
+  </div>
+  <div class="card">
+    <div>⏱ Timer (minutes)</div>
+    <select id="dur">
+      <option value="1">1 (test)</option>
+      <option value="5">5</option>
+      <option value="10" selected>10</option>
+      <option value="15">15</option>
+      <option value="30">30</option>
+      <option value="custom">Custom...</option>
+    </select>
+    <input id="durCustom" class="hidden" type="number" inputmode="numeric" min="1" max="240" placeholder="Type minutes (1 - 240)">
+    <div id="durView" class="hidden"></div>
+  </div>
+  <button id="startBtn" class="green">Start Game</button>
+  <div id="waitMsg" class="sub hidden" style="text-align:center">Waiting for host to start...</div>
+  <button id="leaveBtn" class="gray">Leave</button>
+</div>
+
+<!-- ================= GAME ================= -->
+<div id="game" class="screen hidden">
+  <div id="mapWrap"><div id="map"></div></div>
+  <div id="hud"><div id="timeLeft">--:--</div><div id="caughtInfo">Caught 0/0</div></div>
+  <div id="legend"><div id="gpsMini">📡 GPS...</div></div>
+  <div id="hideBanner" class="hidden"></div>
+
+  <div id="compass">
+    <div class="dial"><div class="ptr"></div><div class="ring" id="ring"><span class="n">N</span><span class="e">E</span><span class="s">S</span><span class="w">W</span></div><div class="dot"></div></div>
+    <div class="read" id="compassRead">Tap compass</div>
+    <div id="compassSrc" style="font-size:10px;color:#8fa0c4;margin-top:2px">--</div>
+  </div>
+
+  <div id="mapBtns">
+    <button class="mb" id="zIn">＋</button>
+    <button class="mb" id="zOut">－</button>
+    <button class="mb on" id="btnFollow">📍</button>
+    <button class="mb on" id="btnRotate">🧭</button>
+    <button class="mb" id="btnFit">👥</button>
+  </div>
+
+  <div id="panel"></div>
+  <div id="attr">© OpenStreetMap</div>
+
+  <div id="countdown" class="overlay hidden"><div>Get ready!</div><div id="count">10</div></div>
+  <div id="endScreen" class="overlay hidden">
+    <div class="big" id="endTitle"></div>
+    <p id="endMsg"></p>
+    <button id="againBtn" class="green" style="max-width:260px">🔁 Play again</button>
+    <div id="againWait" class="sub hidden" style="margin:8px 0">Waiting for host to start a new round...</div>
+    <button id="homeBtn" class="gray" style="max-width:260px">Leave room</button>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+/* =====================================================
+   SETTINGS - change these numbers to tune the game
+   ===================================================== */
+const MAX_PLAYERS    = 20;    // max people in one room
+const MAX_HUNTERS    = 2;     // max hunters
+const MAX_ACC        = 100;   // ignore GPS fixes worse than this many metres (higher = works in more places, less exact)
+const MAX_SPEED      = 12;    // m/s. Faster than this = GPS jump, ignored
+const SEND_EVERY_MS  = 3000;  // how often my location goes to Firebase
+const STALE_MS       = 20000; // player marker fades if no update for this long
+const PRESETS        = ['1', '5', '10', '15', '30'];
+const MAX_HIDES      = 2;     // how many times the hunter can hide
+const HIDE_MS        = 30000; // hide time in milliseconds (30 sec)
+
+/* ===== FIREBASE ===== */
+const firebaseConfig = {
+  apiKey: "AIzaSyDsJFEuZtgD0qJcU6qRxaDxE3ovHaT85xE",
+  authDomain: "man-hunt-afe6f.firebaseapp.com",
+  databaseURL: "https://man-hunt-afe6f-default-rtdb.firebaseio.com",
+  projectId: "man-hunt-afe6f",
+  storageBucket: "man-hunt-afe6f.firebasestorage.app",
+  messagingSenderId: "81113641590",
+  appId: "1:81113641590:web:2e8168a1d5a61209f4e557"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+/* ===== HELPERS ===== */
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clean = s => s.trim().replace(/[.#$\[\]\/]/g, '_').slice(0, 16);
+let offset = 0;
+db.ref('.info/serverTimeOffset').on('value', s => offset = s.val() || 0);
+const now = () => Date.now() + offset;
+
+function dist(lat1, lng1, lat2, lng2) {            // distance in metres between two GPS points
+  const R = 6371000, r = Math.PI / 180;
+  const dLat = (lat2 - lat1) * r, dLng = (lng2 - lng1) * r;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function bearing(lat1, lng1, lat2, lng2) {          // direction (0-360, 0 = north) from point 1 to point 2
+  const r = Math.PI / 180, dl = (lng2 - lng1) * r;
+  const y = Math.sin(dl) * Math.cos(lat2 * r);
+  const x = Math.cos(lat1 * r) * Math.sin(lat2 * r) - Math.sin(lat1 * r) * Math.cos(lat2 * r) * Math.cos(dl);
+  return (Math.atan2(y, x) / r + 360) % 360;
+}
+
+let me = { key: '', room: '' };
+let roomRef = null, state = null;
+let map = null, markers = {}, accCircle = null, mapSide = 0;
+let followMe = true, rotateMap = true, didInitialView = false, curScreen = 'home';
+let soundPlayed = false, ending = false, lastPanel = '', customMode = false;
+let watchId = null, lastSend = 0, wakeLock = null;
+// GPS state
+let myPos = null, lastGood = null, jumpCount = 0, gpsStartAt = 0;
+let crosses = {}, lastHid = false;   // crosses = X marks where players were caught
+// compass state
+let heading = null, hSmooth = null, compassOn = false, lastSensor = 0, bearRef = null, srcName = '', genSensor = null;
+
+
+function show(id) {
+  ['home', 'lobby', 'game'].forEach(s => $(s).classList.toggle('hidden', s !== id));
+  if (id === 'game' && curScreen !== 'game') {
+    initMap(); sizeMap(); didInitialView = false;
+    setTimeout(sizeMap, 120);
+  }
+  curScreen = id;
+}
+const gameVisible = () => curScreen === 'game';
+
+/* =====================================================
+   HOME: create / join
+   ===================================================== */
+$('name').value = localStorage.getItem('mh_name') || '';
+
+$('createBtn').onclick = async () => {
+  unlockAudio(); startCompass();
+  const key = clean($('name').value);
+  if (!key) return alert('Enter your name');
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+  await db.ref('rooms/' + code).set({ host: key, status: 'lobby', duration: 10 });
+  enter(code, key);
+};
+
+$('joinBtn').onclick = () => {
+  unlockAudio(); startCompass();
+  const key = clean($('name').value);
+  const code = $('codeIn').value.trim().toUpperCase();
+  if (!key) return alert('Enter your name');
+  if (code.length < 4) return alert('Enter room code');
+  enter(code, key);
+};
+
+async function enter(code, key) {
+  localStorage.setItem('mh_name', key);
+  const ref = db.ref('rooms/' + code);
+  const snap = await ref.once('value');
+  if (!snap.exists()) return alert('Room not found');
+  const r = snap.val();
+  const existing = r.players && r.players[key];
+  if (r.status !== 'lobby' && !existing) return alert('Game already started');
+  if (!existing && Object.keys(r.players || {}).length >= MAX_PLAYERS) return alert('Room is full (' + MAX_PLAYERS + ' players max)');
+  if (!existing) await ref.child('players/' + key).set({ name: key, role: 'runner', caught: false });
+  me = { key, room: code };
+  roomRef = ref;
+  ending = false; lastPanel = ''; soundPlayed = false; didInitialView = false; customMode = false;
+  roomRef.on('value', s => { state = s.val(); render(); });
+  startGPS();
+  requestWake();
+}
+
+/* =====================================================
+   GPS (with filters so wrong locations are ignored)
+   ===================================================== */
+function setGpsText(txt, warn) {
+  $('gpsStatus').textContent = txt;
+  $('gpsMini').textContent = txt.replace('GPS ', '').slice(0, 34);
+  $('gpsMini').style.color = warn ? '#ffb347' : '#e8eefc';
+}
+
+function startGPS() {
+  if (!navigator.geolocation) { setGpsText('❌ GPS not supported', true); return; }
+  if (watchId !== null) return;
+  gpsStartAt = Date.now(); lastGood = null; jumpCount = 0; bearRef = null;
+  watchId = navigator.geolocation.watchPosition(onFix, err => {
+    if (err.code === 1) setGpsText('❌ Location blocked. Allow PRECISE location for Chrome', true);
+    else if (err.code === 2) setGpsText('⚠️ GPS unavailable. Go outside', true);
+    else setGpsText('⏳ GPS searching...', true);
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+}
+
+function onFix(pos) {
+  const c = pos.coords, t = Date.now();
+  const acc = c.accuracy || 9999;
+
+  // FILTER 1: bad accuracy = usually Wi-Fi / mobile tower / IP guess (this is what showed Nepal)
+  const limit = (!lastGood && t - gpsStartAt > 25000) ? 200 : MAX_ACC;
+  if (acc > limit) { setGpsText('⚠️ GPS weak (±' + Math.round(acc) + ' m), go outside...', true); return; }
+
+  let lat = c.latitude, lng = c.longitude;
+  if (lastGood) {
+    const d = dist(lastGood.lat, lastGood.lng, lat, lng);
+    const dt = Math.max(1, (t - lastGood.t) / 1000);
+    // FILTER 2: impossible jump (faster than a human can run) = ignore, unless it keeps happening
+    if (d > 40 && d / dt > MAX_SPEED && jumpCount < 3) { jumpCount++; return; }
+    jumpCount = 0;
+    // FILTER 3: smoothing
+    if (d < 2.5 && acc >= lastGood.acc * 0.7) { lat = lastGood.lat; lng = lastGood.lng; }   // standing still: no jitter
+    else if (d < 40) {
+      const w = acc > 25 ? 0.4 : 0.65;                                                      // weaker GPS = trust new fix less
+      lat = lastGood.lat + (lat - lastGood.lat) * w;
+      lng = lastGood.lng + (lng - lastGood.lng) * w;
+    }
+  }
+  lastGood = { lat, lng, acc, t };
+  myPos = { lat, lng, acc: Math.round(acc), t };
+  setGpsText('📡 GPS OK (±' + Math.round(acc) + ' m)', false);
+
+  // if the compass sensor is silent, the arrow follows the direction you WALK (from GPS)
+  if (t - lastSensor > 2500) {
+    if (c.heading != null && !isNaN(c.heading) && (c.speed || 0) > 0.8) { setSource('gps'); feedHeading(c.heading); applyHeading(); bearRef = { lat, lng }; }
+    else if (bearRef) {
+      if (dist(bearRef.lat, bearRef.lng, lat, lng) >= 4) { setSource('gps'); feedHeading(bearing(bearRef.lat, bearRef.lng, lat, lng)); applyHeading(); bearRef = { lat, lng }; }
+    } else bearRef = { lat, lng };
+  }
+
+  const mineP = state && state.players && state.players[me.key];
+  const hiddenNow = !!(mineP && mineP.hideUntil > now());   // hunter is hiding: send NOTHING
+  const iAmCaught = !!(mineP && mineP.caught);              // caught players stop sending location
+  if (roomRef && !hiddenNow && !iAmCaught && t - lastSend >= SEND_EVERY_MS) {
+    lastSend = t;
+    roomRef.child('players/' + me.key).update({
+      lat, lng, acc: myPos.acc,
+      hd: heading === null ? null : Math.round(heading),
+      t: firebase.database.ServerValue.TIMESTAMP
+    });
+  }
+  if (gameVisible() && map) {
+    drawMarkers((state && state.players) || {});
+    if (followMe) map.setView([lat, lng], Math.max(map.getZoom(), 15), { animate: false });
+  }
+}
+
+async function requestWake() {
+  try { if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && roomRef) requestWake(); });
+
+/* =====================================================
+   LOBBY ACTIONS
+   ===================================================== */
+function setRole(r) {
+  if (!roomRef || !state || !state.players || !state.players[me.key]) return;
+  roomRef.child('players/' + me.key + '/role').set(r);
+}
+$('roleHunter').onclick = () => setRole('hunter');
+$('rolePlayer').onclick = () => setRole('runner');
+
+$('dur').onchange = () => {
+  if ($('dur').value === 'custom') {
+    customMode = true;
+    $('durCustom').classList.remove('hidden');
+    $('durCustom').focus();
+  } else {
+    customMode = false;
+    $('durCustom').classList.add('hidden');
+    roomRef.child('duration').set(parseInt($('dur').value));
+  }
+};
+$('durCustom').oninput = () => {
+  const v = Math.min(240, parseInt($('durCustom').value) || 0);
+  if (v >= 1) roomRef.child('duration').set(v);
+};
+
+$('startBtn').onclick = () => {
+  const ps = Object.values(state.players || {});
+  const hunters = ps.filter(p => p.role === 'hunter').length;
+  const runners = ps.length - hunters;
+  if (hunters < 1 || hunters > MAX_HUNTERS) return alert('Need 1 to ' + MAX_HUNTERS + ' hunters');
+  if (runners < 1) return alert('Need at least 1 player');
+  const startAt = now() + 10000;
+  roomRef.update({ status: 'playing', startAt, endTime: startAt + (state.duration || 10) * 60000, winner: null });
+};
+$('leaveBtn').onclick = () => leave(true);
+$('homeBtn').onclick = () => leave(false);
+$('againBtn').onclick = () => {                   // host: everybody goes back to the SAME lobby, room stays
+  if (!state || state.host !== me.key) return;
+  const upd = { status: 'lobby', winner: null, startAt: null, endTime: null };
+  Object.keys(state.players || {}).forEach(k => {
+    ['caught', 'cLat', 'cLng', 'hideUntil', 'hides'].forEach(f => upd['players/' + k + '/' + f] = (f === 'caught' ? false : null));
+  });
+  roomRef.update(upd);
+};
+
+function leave(removeSelf) {
+  if (roomRef) {
+    roomRef.off();
+    if (removeSelf && state && state.status === 'lobby' && state.host !== me.key) roomRef.child('players/' + me.key).remove();
+  }
+  if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+  try { if (wakeLock) wakeLock.release(); } catch (e) {}
+  roomRef = null; state = null; soundPlayed = false; myPos = null; lastGood = null; bearRef = null;
+  Object.keys(markers).forEach(removeMarker);
+  Object.keys(crosses).forEach(removeCross);
+  if (accCircle && map) { map.removeLayer(accCircle); accCircle = null; }
+  $('endScreen').classList.add('hidden');
+  show('home');
+}
+
+/* =====================================================
+   MAP (Leaflet). The map box is bigger than the screen so
+   it can be rotated without empty corners.
+   ===================================================== */
+function sizeMap() {
+  const g = $('game');
+  const w = g.clientWidth, h = g.clientHeight;
+  if (!w || !h) return;
+  mapSide = Math.ceil(Math.hypot(w, h)) + 4;
+  const m = $('map');
+  m.style.width = mapSide + 'px'; m.style.height = mapSide + 'px';
+  m.style.marginLeft = (-mapSide / 2) + 'px'; m.style.marginTop = (-mapSide / 2) + 'px';
+  if (map) map.invalidateSize();
+}
+window.addEventListener('resize', () => { if (gameVisible()) sizeMap(); });
+
+function initMap() {
+  if (map) return;
+  map = L.map('map', { zoomControl: false, attributionControl: false, touchZoom: 'center', scrollWheelZoom: 'center', doubleClickZoom: 'center' })
+    .setView([20.59, 78.96], 5);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+  map.on('dragstart', () => { if (followMe && !rotateMap) { followMe = false; applyMode(); } });  // moving the map by hand stops follow
+  applyMode();
+}
+
+function setMapAngle(a) {                       // rotate map so my facing direction points up
+  $('map').style.transform = a ? 'rotate(' + (-a) + 'deg)' : 'none';
+  $('map').style.setProperty('--unrot', a + 'deg');   // keeps player names upright
+}
+
+function applyMode() {
+  if (rotateMap) followMe = true;
+  if (map) { if (rotateMap) map.dragging.disable(); else map.dragging.enable(); }
+  $('btnFollow').classList.toggle('on', followMe);
+  $('btnRotate').classList.toggle('on', rotateMap);
+  if (!rotateMap) setMapAngle(0); else if (hSmooth !== null) setMapAngle(hSmooth);
+  if (followMe && myPos && map) map.setView([myPos.lat, myPos.lng], Math.max(map.getZoom(), 15), { animate: false });
+}
+$('btnFollow').onclick = () => { followMe = !followMe; if (!followMe) rotateMap = false; applyMode(); };
+$('btnRotate').onclick = () => {
+  rotateMap = !rotateMap;
+  applyMode();
+};
+$('zIn').onclick = () => map && map.zoomIn();
+$('zOut').onclick = () => map && map.zoomOut();
+$('btnFit').onclick = () => { followMe = false; rotateMap = false; applyMode(); fitAll(); };
+
+function fitAll() {
+  if (!map) return;
+  const pts = Object.keys(markers).map(k => markers[k].m.getLatLng());
+  if (!pts.length) return;
+  const g = $('game'), w = g.clientWidth, h = g.clientHeight;
+  const px = (mapSide - w) / 2 + 40, py = (mapSide - h) / 2;
+  map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [px, py + 90], paddingBottomRight: [px, py + h * 0.4], maxZoom: 18, animate: false });
+}
+
+const PIN_HTML = '<div class="pinbox"><div class="cone"></div><div class="pin"></div><div class="tagwrap"><div class="tag"></div></div></div>';
+
+function removeMarker(k) {
+  const o = markers[k]; if (!o) return;
+  if (map) map.removeLayer(o.m);
+  delete markers[k];
+}
+
+function ensureCross(k, p, lat, lng) {            // X mark at the place where the player was caught
+  let o = crosses[k];
+  if (!o) {
+    const icon = L.divIcon({ html: '<div class="xwrap"><div class="xmark">✖</div><div class="xtag"></div></div>', className: 'pinwrap', iconSize: [0, 0] });
+    const m = L.marker([lat, lng], { icon, interactive: false, keyboard: false }).addTo(map);
+    o = crosses[k] = { m, tag: m.getElement().querySelector('.xtag') };
+  }
+  o.m.setLatLng([lat, lng]);
+  o.tag.textContent = p.name || k;
+}
+function removeCross(k) {
+  const o = crosses[k]; if (!o) return;
+  if (map) map.removeLayer(o.m);
+  delete crosses[k];
+}
+
+function drawMarkers(players) {
+  if (!map) return;
+  Object.keys(markers).forEach(k => {
+    const p = players[k];
+    if (!p || p.caught || (p.lat == null && !(k === me.key && myPos))) removeMarker(k);   // caught = dot removed
+  });
+  Object.keys(crosses).forEach(k => { const p = players[k]; if (!p || !p.caught) removeCross(k); });
+  Object.keys(players).forEach(k => {
+    const p = players[k], isMe = k === me.key;
+    if (p.caught) {                                  // caught: no dot, leave a cross where they were caught
+      const cl = p.cLat != null ? p.cLat : p.lat, cg = p.cLng != null ? p.cLng : p.lng;
+      if (cl != null && cg != null) ensureCross(k, p, cl, cg);
+      return;
+    }
+    let lat = p.lat, lng = p.lng;
+    if (isMe && myPos) { lat = myPos.lat; lng = myPos.lng; }      // my own dot uses my fresh local GPS
+    if (lat == null) return;
+
+    let o = markers[k];
+    if (!o) {
+      const icon = L.divIcon({ html: PIN_HTML, className: 'pinwrap', iconSize: [0, 0] });
+      const m = L.marker([lat, lng], { icon, interactive: false, keyboard: false }).addTo(map);
+      const el = m.getElement();
+      o = markers[k] = { m, zone: null, box: el.firstChild, cone: el.querySelector('.cone'), tag: el.querySelector('.tag') };
+    }
+    o.m.setLatLng([lat, lng]);
+
+    const stale = !isMe && p.t && (now() - p.t > STALE_MS);
+    const hunter = p.role === 'hunter';
+    o.box.className = 'pinbox ' + (p.caught ? 'caught' : (hunter ? 'hunter' : '')) + (isMe ? ' me' : '') + (stale ? ' stale' : '');
+    o.tag.textContent = (p.name || k) + (stale ? ' (old)' : '');
+
+    // facing arrow
+    const hd = isMe ? (hSmooth !== null ? hSmooth : null) : (p.hd != null ? p.hd : null);
+    if (hd === null || p.caught) o.cone.style.display = 'none';
+    else { o.cone.style.display = 'block'; o.cone.style.transform = 'rotate(' + hd + 'deg)'; }
+
+  });
+
+  // light blue circle = how accurate my GPS is
+  if (myPos) {
+    if (!accCircle) accCircle = L.circle([myPos.lat, myPos.lng], { radius: myPos.acc, color: '#5b9dff', weight: 1, fillColor: '#5b9dff', fillOpacity: .08, interactive: false }).addTo(map);
+    else { accCircle.setLatLng([myPos.lat, myPos.lng]); accCircle.setRadius(myPos.acc); }
+  }
+
+  if (!didInitialView) {
+    if (myPos) { map.setView([myPos.lat, myPos.lng], 18, { animate: false }); didInitialView = true; }
+    else if (Object.keys(markers).length) { fitAll(); didInitialView = true; }
+  }
+}
+
+/* =====================================================
+   RENDER (runs whenever Firebase data changes)
+   ===================================================== */
+function render() {
+  if (!state) { alert('Room closed'); leave(false); return; }
+  const players = state.players || {};
+  const mine = players[me.key] || {};
+  const isHost = state.host === me.key;
+
+  if (state.status === 'lobby') {
+    show('lobby');
+    ending = false; soundPlayed = false; lastPanel = ''; lastHid = false;   // fresh round
+    $('endScreen').classList.add('hidden'); $('countdown').classList.add('hidden'); $('hideBanner').classList.add('hidden');
+    $('lobbyCode').textContent = me.room;
+    const list = Object.entries(players);
+    $('plCount').textContent = 'Players (' + list.length + '/' + MAX_PLAYERS + ')';
+    $('plList').innerHTML = list.map(([k, p]) =>
+      '<div class="row"><span>' + esc(p.name || k) + (k === me.key ? ' (You)' : '') + (k === state.host ? ' 👑' : '') +
+      '</span><span class="badge ' + (p.role === 'hunter' ? 'h' : '') + '">' + (p.role === 'hunter' ? 'Hunter' : 'Player') + '</span></div>').join('');
+    $('roleHunter').classList.toggle('sel', mine.role === 'hunter');
+    $('rolePlayer').classList.toggle('sel', mine.role !== 'hunter');
+
+    // timer (host can choose, others just see it)
+    const dv = String(state.duration || 10);
+    $('durView').classList.toggle('hidden', isHost);
+    $('durView').textContent = dv + ' minutes';
+    $('dur').classList.toggle('hidden', !isHost);
+    if (isHost) {
+      if (!customMode) {
+        if (PRESETS.includes(dv)) { $('dur').value = dv; }
+        else { customMode = true; $('dur').value = 'custom'; $('durCustom').value = dv; }
+      }
+      $('durCustom').classList.toggle('hidden', !customMode);
+    } else $('durCustom').classList.add('hidden');
+
+    $('startBtn').classList.toggle('hidden', !isHost);
+    $('waitMsg').classList.toggle('hidden', isHost);
+    return;
+  }
+
+  // playing or ended
+  show('game');
+  drawMarkers(players);
+  const all = Object.values(players);
+  const runners = all.filter(p => p.role !== 'hunter');
+  const caught = runners.filter(p => p.caught).length;
+  const ctxt = '🎯 Caught ' + caught + '/' + runners.length;
+  if ($('caughtInfo').textContent !== ctxt) {
+    $('caughtInfo').textContent = ctxt;
+    $('caughtInfo').classList.remove('flash'); void $('caughtInfo').offsetWidth; $('caughtInfo').classList.add('flash');
+  }
+
+  // bottom panel
+  let html = '';
+  if (mine.role === 'hunter') {
+    const rows = Object.entries(players).filter(([k, p]) => p.role !== 'hunter' && !p.caught).map(([k, p]) => {
+      let d = '';
+      if (myPos && p.lat != null) d = Math.round(dist(myPos.lat, myPos.lng, p.lat, p.lng) / 5) * 5 + ' m';
+      return '<div class="row"><span>' + esc(p.name || k) + '</span><small style="color:#8fa0c4">' + d + '</small></div>';
+    });
+    const hidesLeft = MAX_HIDES - (mine.hides || 0), amHidden = mine.hideUntil > now();
+    const canHide = !amHidden && hidesLeft > 0;
+    const hideBtn = '<button id="hideBtn" class="' + (canHide ? 'green' : 'gray') + '"' + (canHide ? '' : ' disabled') + '>' +
+      (amHidden ? '🕶 You are hidden' : '🕶 Hide my location ' + (HIDE_MS / 1000) + 's (' + hidesLeft + ' left)') + '</button>';
+    html = '<b>🎯 Hunter mode</b><div style="color:#8fa0c4;font-size:14px;margin-bottom:6px">Touch a player in real life. They press "Catch" on THEIR phone.</div>' + hideBtn + (rows.length ? rows.join('') : '<div style="padding:8px 0">Everyone caught!</div>');
+  } else if (mine.caught) {
+    html = '<b>💀 You were caught</b><div style="color:#8fa0c4">Wait for the game to end.</div>';
+  } else {
+    html = '<b>🏃 Run & hide!</b><div style="color:#8fa0c4">Stay inside the campus. Hunter is the red dot.</div><button id="caughtBtn" class="red">🖐 Catch (hunter caught me)</button>';
+  }
+  if (html !== lastPanel) { $('panel').innerHTML = html; lastPanel = html; }
+
+  // end screen
+  if (state.status === 'ended') {
+    const iAmHunter = mine.role === 'hunter';
+    const hunterWon = state.winner === 'hunter';
+    const won = iAmHunter ? hunterWon : !hunterWon;
+    $('endTitle').textContent = won ? '🏆 YOU WIN' : '😵 YOU LOSE';
+    $('endTitle').style.color = won ? '#1fd98a' : '#ff4d5e';
+    $('endMsg').textContent = hunterWon ? 'All players were caught.' : "Time's up! At least 1 player is safe.";
+    $('endScreen').classList.remove('hidden');
+    $('againBtn').classList.toggle('hidden', !isHost);
+    $('againWait').classList.toggle('hidden', isHost);
+    $('countdown').classList.add('hidden');
+    if (!soundPlayed) {
+      soundPlayed = true;
+      won ? playWin() : playLose();
+      try { navigator.vibrate && navigator.vibrate(won ? [200, 100, 200] : [600]); } catch (e) {}
+    }
+  } else {
+    $('endScreen').classList.add('hidden');
+  }
+}
+
+// Catch button: ONLY on the player's own phone (hunter has none)
+$('panel').addEventListener('click', e => {
+  if (!e.target.closest('#caughtBtn')) return;
+  const p = state && state.players && state.players[me.key];
+  if (!p || p.role === 'hunter' || p.caught || state.status !== 'playing' || now() < state.startAt) return;
+  if (!confirm('Confirm: the Hunter caught you?')) return;
+  const upd = { caught: true };
+  if (myPos) { upd.cLat = myPos.lat; upd.cLng = myPos.lng; }   // remember where I was caught (for the X mark)
+  roomRef.child('players/' + me.key).update(upd);
+});
+
+// Hide button: ONLY the hunter has it. Hunter's location is removed from the database for 30 sec.
+$('panel').addEventListener('click', e => {
+  if (!e.target.closest('#hideBtn')) return;
+  const p = state && state.players && state.players[me.key];
+  if (!p || p.role !== 'hunter' || state.status !== 'playing' || now() < state.startAt) return;
+  const used = p.hides || 0;
+  if (used >= MAX_HIDES || p.hideUntil > now()) return;
+  roomRef.child('players/' + me.key).update({ hideUntil: now() + HIDE_MS, hides: used + 1, lat: null, lng: null, hd: null });
+});
+
+/* =====================================================
+   COMPASS + FACING DIRECTION
+   Three sources, whichever works first:
+   1) phone orientation event  2) Generic Sensor API  3) GPS walking direction
+   ===================================================== */
+const DIRS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+(function buildTicks() {                         // small tick marks around the dial
+  let h = '';
+  for (let a = 0; a < 360; a += 30) { if (a % 90 === 0) continue; h += '<i class="tick" style="transform:rotate(' + a + 'deg) translateY(-43px)"></i>'; }
+  $('ring').insertAdjacentHTML('beforeend', h);
+})();
+
+function setSource(n) {                          // tiny text under the compass: which source is working
+  if (srcName === n) return;
+  srcName = n;
+  $('compassSrc').textContent = { abs: 'sensor OK', gen: 'sensor OK (2)', gps: 'GPS walking dir', none: 'no sensor' }[n] || '--';
+}
+
+function blendAngles(top, back, tiltDeg) {       // phone flat -> use top edge, phone upright -> use back of phone
+  const d = Math.PI / 180;
+  const w = Math.min(1, Math.max(0, (tiltDeg - 25) / 30));
+  const x = Math.sin(top * d) * (1 - w) + Math.sin(back * d) * w;
+  const y = Math.cos(top * d) * (1 - w) + Math.cos(back * d) * w;
+  return (Math.atan2(x, y) / d + 360) % 360;
+}
+
+function sensorHeading(e) {                      // from deviceorientation events
+  if (typeof e.webkitCompassHeading === 'number') return e.webkitCompassHeading;                 // iPhone
+  if (!(e.absolute || e.type === 'deviceorientationabsolute') || e.alpha == null) return null;    // Android: only north-based events
+  const d = Math.PI / 180, a = e.alpha * d, b = (e.beta || 0) * d, g = (e.gamma || 0) * d;
+  const flat = (360 - e.alpha + ((screen.orientation && screen.orientation.angle) || 0)) % 360;
+  const x = -Math.cos(a) * Math.sin(g) - Math.sin(a) * Math.sin(b) * Math.cos(g);
+  const y = -Math.sin(a) * Math.sin(g) + Math.cos(a) * Math.sin(b) * Math.cos(g);
+  const up = (Math.atan2(x, y) / d + 360) % 360;
+  return blendAngles(flat, up, Math.abs(e.beta || 0));
+}
+
+function quatHeading(q) {                        // from AbsoluteOrientationSensor quaternion
+  const x = q[0], y = q[1], z = q[2], w = q[3], d = 180 / Math.PI;
+  const r01 = 2 * (x * y - z * w), r11 = 1 - 2 * (x * x + z * z);        // phone top edge in world (east, north)
+  const r02 = 2 * (x * z + y * w), r12 = 2 * (y * z - x * w), r22 = 1 - 2 * (x * x + y * y);   // phone screen-normal
+  const top = (Math.atan2(r01, r11) * d + 360) % 360;
+  const back = (Math.atan2(-r02, -r12) * d + 360) % 360;
+  const tilt = Math.acos(Math.max(-1, Math.min(1, r22))) * d;
+  return blendAngles(top, back, tilt);
+}
+
+function feedHeading(raw) {                       // smoothing so the arrow does not shake
+  if (hSmooth === null) hSmooth = raw;
+  else {
+    const delta = ((raw - hSmooth) % 360 + 540) % 360 - 180;   // shortest turn (handles 359 -> 0)
+    hSmooth += delta * 0.3;
+  }
+  heading = ((hSmooth % 360) + 360) % 360;
+}
+
+function applyHeading() {
+  if (heading === null) return;
+  $('ring').style.transform = 'rotate(' + (-hSmooth) + 'deg)';
+  $('compassRead').textContent = DIRS[Math.round(heading / 45) % 8] + ' ' + Math.round(heading) + '°';
+  if (rotateMap && gameVisible()) setMapAngle(hSmooth);          // map turns with you
+  const o = markers[me.key];                                     // my arrow turns instantly
+  if (o) {
+    const p = state && state.players && state.players[me.key];
+    if (!(p && p.caught)) { o.cone.style.display = 'block'; o.cone.style.transform = 'rotate(' + hSmooth + 'deg)'; }
+  }
+}
+
+function gotSensor(src, h) {
+  const t = Date.now();
+  if (t - lastSensor < 50) return;                 // max ~20 updates per second
+  lastSensor = t;
+  setSource(src);
+  feedHeading(h);
+  applyHeading();
+}
+function onOrient(e) {
+  const h = sensorHeading(e);
+  if (h === null || isNaN(h)) return;
+  gotSensor('abs', h);
+}
+
+function startGenericSensor() {                  // second try: Chrome's AbsoluteOrientationSensor
+  if (genSensor || typeof AbsoluteOrientationSensor === 'undefined') return;
+  try {
+    const s = new AbsoluteOrientationSensor({ frequency: 30 });
+    s.addEventListener('reading', () => { if (s.quaternion) gotSensor('gen', quatHeading(s.quaternion)); });
+    s.addEventListener('error', () => {});
+    s.start();
+    genSensor = s;
+  } catch (e) {}
+}
+
+async function startCompass() {
+  if (compassOn) return;
+  $('compassRead').textContent = 'Starting...';
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();                 // iPhone asks permission
+      if (r !== 'granted') { $('compassRead').textContent = 'Compass denied'; return; }
+    }
+  } catch (e) {}
+  compassOn = true;
+  window.addEventListener('deviceorientationabsolute', onOrient, true);
+  window.addEventListener('deviceorientation', onOrient, true);
+  setTimeout(() => { if (!lastSensor) startGenericSensor(); }, 1500);
+  setTimeout(() => { if (!lastSensor && heading === null) { setSource('none'); $('compassRead').textContent = 'No compass'; } }, 4000);
+}
+
+$('compass').addEventListener('click', () => {    // tap = restart the sensor
+  window.removeEventListener('deviceorientationabsolute', onOrient, true);
+  window.removeEventListener('deviceorientation', onOrient, true);
+  try { if (genSensor) genSensor.stop(); } catch (e) {}
+  genSensor = null; compassOn = false; lastSensor = 0; hSmooth = null; heading = null; srcName = '';
+  $('compassRead').textContent = 'Wave phone in 8';
+  startCompass();
+  setTimeout(() => {
+    if (!lastSensor) alert('Compass sensor is not giving data.\n\nFix: Chrome menu (3 dots) > Settings > Site settings > Motion sensors > Allowed. Also turn off Battery Saver.\n\nUntil then, the arrow follows the direction you WALK (GPS).');
+  }, 3500);
+});
+
+/* =====================================================
+   SOUND
+   ===================================================== */
+let actx = null;
+function unlockAudio() {
+  try {
+    if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') actx.resume();
+  } catch (e) {}
+}
+document.addEventListener('pointerdown', unlockAudio);
+function tone(freq, start, dur, type, vol) {
+  if (!actx) return;
+  const t0 = actx.currentTime + start;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.value = freq;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(actx.destination);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function playWin() { [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone(f, i * 0.16, 0.3, 'triangle', 0.35)); }
+function playLose() { [392, 370, 349, 311].forEach((f, i) => tone(f, i * 0.38, 0.5, 'sawtooth', 0.2)); }
+
+/* =====================================================
+   TIMER + END CHECK
+   ===================================================== */
+setInterval(() => {
+  const r = state;
+  if (!r || r.status === 'lobby') return;
+  const t = now();
+  // hide banner + refresh the hunter's button when hide time ends
+  const hiddenHunter = Object.entries(r.players || {}).find(([k, p]) => p.role === 'hunter' && p.hideUntil > t);
+  const iHidden = !!(r.players && r.players[me.key] && r.players[me.key].hideUntil > t);
+  if (iHidden !== lastHid) { lastHid = iHidden; if (!iHidden) lastSend = 0; render(); }
+  if (hiddenHunter && r.status === 'playing') {
+    const sec = Math.ceil((hiddenHunter[1].hideUntil - t) / 1000);
+    $('hideBanner').textContent = (hiddenHunter[0] === me.key ? '🕶 You are hidden ' : '🕶 Hunter hidden ') + sec + 's';
+    $('hideBanner').classList.remove('hidden');
+  } else $('hideBanner').classList.add('hidden');
+  if (r.status === 'playing') {
+    if (t < r.startAt) {
+      $('count').textContent = Math.ceil((r.startAt - t) / 1000);
+      $('countdown').classList.remove('hidden');
+    } else $('countdown').classList.add('hidden');
+    const left = Math.max(0, r.endTime - Math.max(t, r.startAt));
+    const m = Math.floor(left / 60000), s = Math.floor((left % 60000) / 1000);
+    $('timeLeft').textContent = '⏱ ' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    checkEnd(r, t);
+  } else {
+    $('timeLeft').textContent = '⏱ 00:00';
+  }
+}, 500);
+
+function checkEnd(r, t) {
+  if (ending || t < r.startAt) return;
+  const ps = Object.values(r.players || {});
+  const hunters = ps.filter(p => p.role === 'hunter');
+  const runners = ps.filter(p => p.role !== 'hunter');
+  let w = null;
+  if (hunters.length && runners.length && runners.every(p => p.caught)) w = 'hunter';
+  else if (t >= r.endTime) w = 'players';
+  if (w) { ending = true; roomRef.update({ status: 'ended', winner: w }); }
+}
+</script>
+</body>
+</html>
