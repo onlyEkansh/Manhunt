@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0b1220">
+<title>Manhunt Stats (owner)</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#0b1220;color:#e8eefc;font-family:system-ui,Arial,sans-serif}
+.wrap{padding:16px;max-width:760px;margin:0 auto}
+h1{font-size:26px;margin:6px 0 10px}
+h2{font-size:17px;margin:22px 0 8px;color:#9fb3e8}
+.hidden{display:none!important}
+button{padding:12px 16px;border:0;border-radius:12px;font-size:15px;font-weight:700;color:#fff;background:#5b4bff;margin:4px 6px 4px 0}
+button.gray{background:#2a3a63}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.card{background:#131d36;border-radius:14px;padding:12px 14px}
+.card .n{font-size:30px;font-weight:800}
+.card .l{font-size:12px;color:#8fa0c4}
+.card.green .n{color:#38d996}
+.list{background:#131d36;border-radius:14px;padding:6px 14px}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #22305a;font-size:14px}
+.row:last-child{border:0}
+.sm{font-size:12px;color:#8fa0c4}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;background:#556}
+.dot.on{background:#38d996}
+.tag{font-size:11px;padding:2px 8px;border-radius:12px;background:#2a3a63;margin-left:4px;white-space:nowrap}
+.tag.red{background:#e0394b}
+.empty{padding:14px 0;color:#8fa0c4;font-size:14px}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}
+th{text-align:left;color:#8fa0c4;font-weight:600;padding:6px 8px 6px 0}
+td{padding:7px 8px 7px 0;border-top:1px solid #22305a}
+#msg{color:#ffb347;font-size:14px;margin:10px 0}
+</style>
+</head>
+<body>
+
+<div id="login" class="wrap">
+  <h1>📊 Manhunt Stats</h1>
+  <p class="sm" style="font-size:14px">Owner only. Sign in with the Google account that owns the Firebase project.</p>
+  <button id="gBtn">Sign in with Google</button>
+  <p id="loginMsg"></p>
+</div>
+
+<div id="dash" class="wrap hidden">
+  <h1>📊 Manhunt Stats</h1>
+  <div class="sm" id="who"></div>
+  <div style="margin:8px 0">
+    <button id="refreshBtn" class="gray">↻ Refresh rooms</button>
+    <button id="outBtn" class="gray">Sign out</button>
+  </div>
+  <div id="msg"></div>
+
+  <div class="grid">
+    <div class="card green"><div class="n" id="cOnline">0</div><div class="l">Online now</div></div>
+    <div class="card"><div class="n" id="cUnique">0</div><div class="l">Unique visitors (devices)</div></div>
+    <div class="card"><div class="n" id="cToday">0</div><div class="l">New visitors today</div></div>
+    <div class="card"><div class="n" id="cOpens">0</div><div class="l">Total app opens</div></div>
+    <div class="card"><div class="n" id="cJoined">0</div><div class="l">People who joined a game</div></div>
+    <div class="card"><div class="n" id="cRooms">0</div><div class="l">Rooms created</div></div>
+    <div class="card"><div class="n" id="cLive">0</div><div class="l">Live rooms right now</div></div>
+    <div class="card"><div class="n" id="cGames">0</div><div class="l">Games started (recent)</div></div>
+  </div>
+
+  <h2>🟢 Online now</h2>
+  <div class="list" id="onlineList"></div>
+
+  <h2>🏠 Live rooms</h2>
+  <div class="list" id="roomList"></div>
+
+  <h2>🕒 Recent activity</h2>
+  <div class="list" id="eventList"></div>
+
+  <h2>🔗 Where visitors came from</h2>
+  <div class="list" id="srcList"></div>
+
+  <h2>📱 Devices</h2>
+  <div class="list" id="devList"></div>
+
+  <h2>👥 All visitors</h2>
+  <div class="list scroll"><table id="userTable"></table></div>
+  <p class="sm" style="margin-top:14px">Names are what players typed in the app. Visitors who only opened the link have no name. Country and city are not collected here (use Google Analytics for that).</p>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script>
+const firebaseConfig = {
+  apiKey: "AIzaSyDsJFEuZtgD0qJcU6qRxaDxE3ovHaT85xE",
+  authDomain: "man-hunt-afe6f.firebaseapp.com",
+  databaseURL: "https://man-hunt-afe6f-default-rtdb.firebaseio.com",
+  projectId: "man-hunt-afe6f",
+  storageBucket: "man-hunt-afe6f.firebasestorage.app",
+  messagingSenderId: "81113641590",
+  appId: "1:81113641590:web:2e8168a1d5a61209f4e557"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.database();
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+let users = {}, events = [], rooms = {}, started = false, roomTimer = null;
+
+/* ---------- login ---------- */
+$('gBtn').onclick = async () => {
+  $('loginMsg').textContent = '';
+  try { await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
+  catch (e) { $('loginMsg').textContent = 'Sign-in failed: ' + (e.message || e.code); }
+};
+$('outBtn').onclick = () => { auth.signOut(); location.reload(); };
+$('refreshBtn').onclick = loadRooms;
+
+auth.onAuthStateChanged(u => {
+  if (u && !u.isAnonymous) {
+    $('login').classList.add('hidden'); $('dash').classList.remove('hidden');
+    $('who').textContent = 'Signed in as ' + (u.email || u.displayName || 'owner');
+    start();
+  } else {
+    $('dash').classList.add('hidden'); $('login').classList.remove('hidden');
+  }
+});
+
+/* ---------- data (only the owner's Google account is allowed by the database rules) ---------- */
+function denied(e) {
+  $('msg').textContent = 'Database refused: this Google account is not the owner, or the rules are not published yet. (' + (e && e.message ? e.message : '') + ')';
+}
+function start() {
+  if (started) return;
+  started = true;
+  db.ref('analytics/users').on('value', s => { users = s.val() || {}; render(); }, denied);
+  db.ref('analytics/events').orderByChild('t').limitToLast(300).on('value', s => {
+    events = [];
+    s.forEach(c => { events.push(c.val()); });
+    events.reverse();                                  // newest first
+    render();
+  }, denied);
+  loadRooms();
+  roomTimer = setInterval(loadRooms, 30000);           // rooms are refreshed every 30 seconds (saves data)
+}
+async function loadRooms() {
+  try { const s = await db.ref('rooms').once('value'); rooms = s.val() || {}; render(); } catch (e) { denied(e); }
+}
+
+/* ---------- helpers ---------- */
+function ago(ts) {
+  if (!ts) return '-';
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + ' min ago';
+  const h = Math.floor(m / 60);
+  if (h < 24) return h + ' h ago';
+  return Math.floor(h / 24) + ' d ago';
+}
+const when = ts => ts ? new Date(ts).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '-';
+const ICON = { visit: '👀', create: '🏠', join: '🙋', start: '▶️' };
+const LABEL = { visit: 'opened the app', create: 'created a room', join: 'joined a room', start: 'started a game' };
+
+function countBy(arr, fn) { const o = {}; arr.forEach(x => { const k = fn(x) || 'unknown'; o[k] = (o[k] || 0) + 1; }); return o; }
+function listCounts(el, obj) {
+  const rows = Object.entries(obj).sort((a, b) => b[1] - a[1]);
+  el.innerHTML = rows.length ? rows.map(([k, v]) => '<div class="row"><span>' + esc(k) + '</span><b>' + v + '</b></div>').join('') : '<div class="empty">No data yet.</div>';
+}
+
+/* ---------- draw ---------- */
+function render() {
+  const U = Object.entries(users).map(([id, u]) => Object.assign({ id }, u));
+  const startToday = new Date(); startToday.setHours(0, 0, 0, 0);
+  const online = U.filter(u => u.online === true).sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+
+  $('cOnline').textContent = online.length;
+  $('cUnique').textContent = U.length;
+  $('cToday').textContent = U.filter(u => (u.firstSeen || 0) >= startToday.getTime()).length;
+  $('cOpens').textContent = U.reduce((a, u) => a + (u.visits || 0), 0);
+  $('cJoined').textContent = U.filter(u => (u.joins || 0) + (u.created || 0) > 0).length;
+  $('cRooms').textContent = U.reduce((a, u) => a + (u.created || 0), 0);
+  $('cLive').textContent = Object.keys(rooms).length;
+  $('cGames').textContent = events.filter(e => e.type === 'start').length;
+
+  $('onlineList').innerHTML = online.length ? online.map(u =>
+    '<div class="row"><span><span class="dot on"></span>' + esc(u.name || 'Visitor') +
+    (u.room ? '<span class="tag">room ' + esc(u.room) + '</span>' : '') + '</span>' +
+    '<span class="sm">' + esc(u.dev || '') + ' · ' + esc(u.src || '') + '</span></div>').join('')
+    : '<div class="empty">Nobody online right now.</div>';
+
+  const R = Object.entries(rooms);
+  $('roomList').innerHTML = R.length ? R.map(([code, r]) => {
+    const names = Object.values(r.players || {}).map(p => esc(p.name) + (p.role === 'hunter' ? ' 🎯' : '') + (p.caught ? ' ✖' : '')).join(', ');
+    return '<div class="row"><span><b>' + esc(code) + '</b><span class="tag' + (r.status === 'playing' ? ' red' : '') + '">' + esc(r.status) + '</span><br><span class="sm">host ' + esc(r.host) + ' · ' + names + '</span></span>' +
+      '<span class="sm">' + Object.keys(r.players || {}).length + ' players</span></div>';
+  }).join('') : '<div class="empty">No live rooms.</div>';
+
+  $('eventList').innerHTML = events.length ? events.slice(0, 40).map(e =>
+    '<div class="row"><span>' + (ICON[e.type] || '•') + ' ' + esc(e.name || 'Visitor') + ' <span class="sm">' + (LABEL[e.type] || esc(e.type)) +
+    (e.room ? ' (' + esc(e.room) + ')' : '') + (e.src && e.type === 'visit' ? ' via ' + esc(e.src) : '') + '</span></span>' +
+    '<span class="sm">' + ago(e.t) + '</span></div>').join('') : '<div class="empty">No activity yet.</div>';
+
+  listCounts($('srcList'), countBy(U, u => u.src));
+  listCounts($('devList'), countBy(U, u => u.dev));
+
+  const sorted = U.slice().sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0));
+  $('userTable').innerHTML = '<tr><th></th><th>Name</th><th>From</th><th>Device</th><th>Opens</th><th>Joined</th><th>First seen</th><th>Last seen</th></tr>' +
+    sorted.map(u => '<tr><td><span class="dot' + (u.online ? ' on' : '') + '"></span></td><td>' + esc(u.name || '-') + '</td><td>' + esc(u.src || '-') + '</td><td>' + esc(u.dev || '-') +
+      '</td><td>' + (u.visits || 0) + '</td><td>' + ((u.joins || 0) + (u.created || 0)) + '</td><td>' + when(u.firstSeen) + '</td><td>' + ago(u.lastSeen) + '</td></tr>').join('');
+}
+</script>
+</body>
+</html>

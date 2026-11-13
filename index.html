@@ -96,6 +96,7 @@ button:disabled{opacity:.4}
   <div style="text-align:center;color:#8fa0c4;margin:10px">— or —</div>
   <input id="codeIn" maxlength="6" placeholder="Room code" autocapitalize="characters" autocomplete="off" style="text-transform:uppercase;text-align:center;letter-spacing:4px">
   <button id="joinBtn" class="green">Join Room</button>
+  <p class="sub" style="font-size:12px;margin-top:18px">📍 Your live location is shown only to players in your room. We save the name you type and anonymous usage stats (visits, device type). Room data is deleted when the host closes the room.</p>
 </div>
 
 <!-- ================= LOBBY ================= -->
@@ -124,6 +125,7 @@ button:disabled{opacity:.4}
   <button id="startBtn" class="green">Start Game</button>
   <div id="waitMsg" class="sub hidden" style="text-align:center">Waiting for host to start...</div>
   <button id="leaveBtn" class="gray">Leave</button>
+  <button id="closeBtn" class="gray hidden">🗑 Close room (delete for everyone)</button>
 </div>
 
 <!-- ================= GAME ================= -->
@@ -157,12 +159,14 @@ button:disabled{opacity:.4}
     <button id="againBtn" class="green" style="max-width:260px">🔁 Play again</button>
     <div id="againWait" class="sub hidden" style="margin:8px 0">Waiting for host to start a new round...</div>
     <button id="homeBtn" class="gray" style="max-width:260px">Leave room</button>
+    <button id="closeBtn2" class="gray hidden" style="max-width:260px">🗑 Close room</button>
   </div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script>
 /* =====================================================
    SETTINGS - change these numbers to tune the game
@@ -189,6 +193,79 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
+
+/* =====================================================
+   SECURITY: anonymous login (no account, no password).
+   The database rules only accept requests from signed-in phones.
+   ===================================================== */
+const auth = firebase.auth();
+let authPromise = null;
+function ensureAuth() {
+  if (!authPromise) {
+    authPromise = new Promise((resolve, reject) => {
+      const off = auth.onAuthStateChanged(u => {            // keep an existing login if there is one
+        off();
+        if (u) resolve(u);
+        else auth.signInAnonymously().then(c => resolve(c.user)).catch(reject);
+      });
+    });
+    authPromise.catch(() => { authPromise = null; });
+  }
+  return authPromise;
+}
+ensureAuth().catch(() => {});
+
+let ruleAlerted = false;                           // if the database refuses something, tell the user once
+window.addEventListener('unhandledrejection', e => {
+  const m = String((e.reason && e.reason.message) || e.reason || '');
+  if (/permission/i.test(m) && !ruleAlerted) { ruleAlerted = true; alert('Server refused this action. Refresh the page and try again.'); }
+});
+
+/* =====================================================
+   ANALYTICS (only the owner can read it, in stats.html)
+   One record per visitor (anonymous id): visits, name typed, device,
+   where they came from, online now. Plus a log of events.
+   Analytics can never break the game: every call is wrapped.
+   ===================================================== */
+const TS = () => firebase.database.ServerValue.TIMESTAMP;
+const INC = () => firebase.database.ServerValue.increment(1);
+const SRC = ((new URLSearchParams(location.search).get('utm_source') || 'direct').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 20)) || 'direct';
+const DEV = /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 'mobile' : 'desktop';
+let myUid = null;
+const myId = () => (auth.currentUser ? auth.currentUser.uid : null);   // my login id (used to know if I am the host)
+const quiet = p => { try { return Promise.resolve(p).catch(() => {}); } catch (e) { return Promise.resolve(); } };
+
+function logEvent(type, extra) {
+  if (!myUid) return;
+  quiet(db.ref('analytics/events').push(Object.assign({ t: TS(), type, uid: myUid }, extra || {})));
+}
+
+async function startAnalytics() {
+  try {
+    const user = await ensureAuth();
+    if (!user.isAnonymous) return;                  // the owner (signed in with Google) is not counted as a visitor
+    myUid = user.uid;
+    const uref = db.ref('analytics/users/' + myUid);
+    const snap = await uref.once('value');
+    const upd = { lastSeen: TS(), visits: INC(), src: SRC, dev: DEV };
+    if (!snap.exists()) upd.firstSeen = TS();
+    await uref.update(upd);
+    logEvent('visit', { src: SRC });
+    db.ref('.info/connected').on('value', s => {    // presence: online now / offline
+      if (s.val() !== true) return;
+      quiet(uref.child('online').onDisconnect().set(false).then(() => uref.update({ online: true })));
+      quiet(uref.child('lastOnline').onDisconnect().set(TS()));
+    });
+  } catch (e) {}
+}
+
+function trackJoin(name, code, created) {
+  if (!myUid) return;
+  const u = { name, room: code, lastSeen: TS() };
+  u[created ? 'created' : 'joins'] = INC();
+  quiet(db.ref('analytics/users/' + myUid).update(u));
+  logEvent(created ? 'create' : 'join', { name, room: code });
+}
 
 /* ===== HELPERS ===== */
 const $ = id => document.getElementById(id);
@@ -244,23 +321,30 @@ $('createBtn').onclick = async () => {
   unlockAudio(); startCompass();
   const key = clean($('name').value);
   if (!key) return alert('Enter your name');
+  let user;
+  try { user = await ensureAuth(); } catch (e) { return alert('Could not connect to the server. Check internet and try again.'); }
+  const prev = localStorage.getItem('mh_myroom');           // clean up my old room so old data does not pile up
+  if (prev) quiet(db.ref('rooms/' + prev).remove());
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  await db.ref('rooms/' + code).set({ host: key, status: 'lobby', duration: 10 });
-  enter(code, key);
+  try { await db.ref('rooms/' + code).set({ host: key, hostUid: user.uid, status: 'lobby', duration: 10 }); }
+  catch (e) { return alert('Could not create the room. Refresh the page and try again.'); }
+  localStorage.setItem('mh_myroom', code);
+  enter(code, key, true);
 };
 
-$('joinBtn').onclick = () => {
+$('joinBtn').onclick = async () => {
   unlockAudio(); startCompass();
   const key = clean($('name').value);
   const code = $('codeIn').value.trim().toUpperCase();
   if (!key) return alert('Enter your name');
   if (code.length < 4) return alert('Enter room code');
-  enter(code, key);
+  try { await ensureAuth(); } catch (e) { return alert('Could not connect to the server. Check internet and try again.'); }
+  enter(code, key, false);
 };
 
-async function enter(code, key) {
+async function enter(code, key, created) {
   localStorage.setItem('mh_name', key);
   const ref = db.ref('rooms/' + code);
   const snap = await ref.once('value');
@@ -276,6 +360,7 @@ async function enter(code, key) {
   roomRef.on('value', s => { state = s.val(); render(); });
   startGPS();
   requestWake();
+  trackJoin(key, code, !!created);
 }
 
 /* =====================================================
@@ -389,8 +474,21 @@ $('startBtn').onclick = () => {
   if (runners < 1) return alert('Need at least 1 player');
   const startAt = now() + 10000;
   roomRef.update({ status: 'playing', startAt, endTime: startAt + (state.duration || 10) * 60000, winner: null });
+  logEvent('start', { room: me.room });
 };
-$('leaveBtn').onclick = () => leave(true);
+let closingRoom = false;
+function closeRoom() {                             // host only: deletes the room and all its data for everyone
+  if (!roomRef || !state || !myId() || state.hostUid !== myId()) return;
+  if (!confirm('Close this room? All players will be removed and the room data is deleted.')) return;
+  closingRoom = true;
+  roomRef.remove().catch(() => { closingRoom = false; alert('Could not close the room. Try again.'); });
+}
+$('closeBtn').onclick = closeRoom;
+$('closeBtn2').onclick = closeRoom;
+$('leaveBtn').onclick = () => {
+  if (state && myId() && state.hostUid === myId()) return closeRoom();   // host leaving closes the room
+  leave(true);
+};
 $('homeBtn').onclick = () => leave(false);
 $('againBtn').onclick = () => {                   // host: everybody goes back to the SAME lobby, room stays
   if (!state || state.host !== me.key) return;
@@ -408,6 +506,7 @@ function leave(removeSelf) {
   }
   if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
   try { if (wakeLock) wakeLock.release(); } catch (e) {}
+  if (myUid) quiet(db.ref('analytics/users/' + myUid).update({ room: null }));
   roomRef = null; state = null; soundPlayed = false; myPos = null; lastGood = null; bearRef = null;
   Object.keys(markers).forEach(removeMarker);
   Object.keys(crosses).forEach(removeCross);
@@ -551,7 +650,7 @@ function drawMarkers(players) {
    RENDER (runs whenever Firebase data changes)
    ===================================================== */
 function render() {
-  if (!state) { alert('Room closed'); leave(false); return; }
+  if (!state) { if (!closingRoom) alert('Room closed by the host.'); closingRoom = false; leave(false); return; }
   const players = state.players || {};
   const mine = players[me.key] || {};
   const isHost = state.host === me.key;
@@ -583,6 +682,7 @@ function render() {
     } else $('durCustom').classList.add('hidden');
 
     $('startBtn').classList.toggle('hidden', !isHost);
+    $('closeBtn').classList.toggle('hidden', !(myId() && state.hostUid === myId()));
     $('waitMsg').classList.toggle('hidden', isHost);
     return;
   }
@@ -629,6 +729,7 @@ function render() {
     $('endMsg').textContent = hunterWon ? 'All players were caught.' : "Time's up! At least 1 player is safe.";
     $('endScreen').classList.remove('hidden');
     $('againBtn').classList.toggle('hidden', !isHost);
+    $('closeBtn2').classList.toggle('hidden', !(myId() && state.hostUid === myId()));
     $('againWait').classList.toggle('hidden', isHost);
     $('countdown').classList.add('hidden');
     if (!soundPlayed) {
@@ -848,6 +949,8 @@ function checkEnd(r, t) {
   else if (t >= r.endTime) w = 'players';
   if (w) { ending = true; roomRef.update({ status: 'ended', winner: w }); }
 }
+
+startAnalytics();
 </script>
 </body>
 </html>
