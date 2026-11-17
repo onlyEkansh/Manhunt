@@ -34,6 +34,7 @@ table{width:100%;border-collapse:collapse;font-size:13px;white-space:nowrap}
 th{text-align:left;color:#8fa0c4;font-weight:600;padding:6px 8px 6px 0}
 td{padding:7px 8px 7px 0;border-top:1px solid #22305a}
 #msg{color:#ffb347;font-size:14px;margin:10px 0}
+input{width:100%;padding:13px;margin:6px 0;border-radius:12px;border:1px solid #2a3a63;background:#131d36;color:#fff;font-size:16px}
 </style>
 </head>
 <body>
@@ -42,7 +43,12 @@ td{padding:7px 8px 7px 0;border-top:1px solid #22305a}
   <h1>📊 Manhunt Stats</h1>
   <p class="sm" style="font-size:14px">Owner only. Sign in with the Google account that owns the Firebase project.</p>
   <button id="gBtn">Sign in with Google</button>
-  <p id="loginMsg"></p>
+  <div class="sm" style="margin:16px 0 4px">If Google login gives errors, use email and password instead:</div>
+  <input id="em" type="email" placeholder="Email" autocomplete="username">
+  <input id="pw" type="password" placeholder="Password" autocomplete="current-password">
+  <button id="eBtn" class="gray">Sign in with email</button>
+  <p id="loginMsg" style="color:#ffb347;font-size:14px"></p>
+  <p class="sm">stats.html v3 (email login added)</p>
 </div>
 
 <div id="dash" class="wrap hidden">
@@ -128,6 +134,21 @@ $('gBtn').onclick = async () => {
   }
   signing = false; $('gBtn').disabled = false; $('gBtn').textContent = 'Sign in with Google';
 };
+$('eBtn').onclick = async () => {
+  const em = $('em').value.trim(), pw = $('pw').value;
+  if (!em || !pw) { $('loginMsg').textContent = 'Type your email and password.'; return; }
+  $('eBtn').disabled = true; $('loginMsg').textContent = '';
+  try { await auth.signInWithEmailAndPassword(em, pw); }
+  catch (e) {
+    const c = e.code || '';
+    let m = 'Sign-in failed: ' + (e.message || c);
+    if (c === 'auth/invalid-credential' || c === 'auth/wrong-password' || c === 'auth/user-not-found' || c === 'auth/invalid-login-credentials') m = 'Wrong email or password.';
+    else if (c === 'auth/operation-not-allowed') m = 'Email/Password sign-in is not enabled. Enable it in Firebase > Authentication > Sign-in method.';
+    else if (c === 'auth/too-many-requests') m = 'Too many attempts. Wait a few minutes and try again.';
+    $('loginMsg').textContent = m;
+  }
+  $('eBtn').disabled = false;
+};
 $('outBtn').onclick = () => { auth.signOut(); location.reload(); };
 $('refreshBtn').onclick = loadRooms;
 
@@ -143,7 +164,7 @@ auth.onAuthStateChanged(u => {
 
 /* ---------- data (only the owner's Google account is allowed by the database rules) ---------- */
 function denied(e) {
-  $('msg').textContent = 'Database refused: this Google account is not the owner, or the rules are not published yet. (' + (e && e.message ? e.message : '') + ')';
+  $('msg').textContent = 'Database refused: this account is not the owner, or the rules are not published yet. If you used email login, your UID must be in the Rules. (' + (e && e.message ? e.message : '') + ')';
 }
 function start() {
   if (started) return;
