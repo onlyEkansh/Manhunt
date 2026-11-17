@@ -108,10 +108,25 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp
 let users = {}, events = [], rooms = {}, started = false, roomTimer = null;
 
 /* ---------- login ---------- */
+let signing = false;                                   // only ONE popup at a time (double taps cause "conflicting popup")
 $('gBtn').onclick = async () => {
+  if (signing) return;
+  signing = true; $('gBtn').disabled = true; $('gBtn').textContent = 'Opening Google...';
   $('loginMsg').textContent = '';
-  try { await auth.signInWithPopup(new firebase.auth.GoogleAuthProvider()); }
-  catch (e) { $('loginMsg').textContent = 'Sign-in failed: ' + (e.message || e.code); }
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  try { await auth.signInWithPopup(provider); }
+  catch (e) {
+    const code = e.code || '';
+    let m = 'Sign-in failed: ' + (e.message || code);
+    if (code === 'auth/cancelled-popup-request' || code === 'auth/popup-closed-by-user')
+      m = 'Sign-in was cancelled. Close the other Google / Firebase tabs, refresh this page, and tap the button only ONCE. Stay on this tab until it comes back.';
+    else if (code === 'auth/popup-blocked') m = 'The popup was blocked. Allow pop-ups for this site in Chrome and try again.';
+    else if (code === 'auth/unauthorized-domain') m = 'This domain is not authorized. Add onlyekansh.github.io in Firebase > Authentication > Settings > Authorized domains.';
+    else if (code === 'auth/operation-not-allowed') m = 'Google sign-in is not enabled. Enable it in Firebase > Authentication > Sign-in method.';
+    $('loginMsg').textContent = m;
+  }
+  signing = false; $('gBtn').disabled = false; $('gBtn').textContent = 'Sign in with Google';
 };
 $('outBtn').onclick = () => { auth.signOut(); location.reload(); };
 $('refreshBtn').onclick = loadRooms;
